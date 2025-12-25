@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>AI Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LLM Chat App</title>
 
 <style>
 :root {
@@ -11,48 +11,54 @@
   --card: #12182b;
   --accent: #4cc9f0;
   --user: #4895ef;
-  --ai: #3a0ca3;
+  --ai: #560bad;
   --text: #e6e6eb;
+  --text-light: #9ca3af;
 }
 
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
 body {
-  margin: 0;
   background: radial-gradient(circle at top, #141a3a, var(--bg));
+  color: var(--text);
   height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  color: var(--text);
+}
+
+header {
+  margin: 1rem 0;
+  text-align: center;
+}
+
+h1 {
+  font-size: 1.6rem;
+  background: linear-gradient(135deg, var(--accent), #4895ef);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .chat-container {
   width: 100%;
-  max-width: 420px;
-  height: 90vh;
+  max-width: 800px;
+  height: calc(100vh - 160px);
   background: var(--card);
-  border-radius: 18px;
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 40px rgba(76, 201, 240, 0.15);
   overflow: hidden;
-}
-
-.chat-header {
-  padding: 16px;
-  background: linear-gradient(135deg, var(--ai), var(--accent));
-  font-weight: 600;
-  font-size: 18px;
-  text-align: center;
+  box-shadow: 0 0 40px rgba(76, 201, 240, 0.15);
 }
 
 .chat-messages {
   flex: 1;
-  padding: 16px;
+  padding: 1rem;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -63,54 +69,79 @@ body {
   max-width: 80%;
   padding: 12px 14px;
   border-radius: 14px;
-  line-height: 1.4;
   animation: fadeIn 0.3s ease-in;
 }
 
-.user {
+.message p {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.user-message {
   align-self: flex-end;
   background: linear-gradient(135deg, var(--user), #4361ee);
 }
 
-.ai {
+.assistant-message {
   align-self: flex-start;
-  background: linear-gradient(135deg, var(--ai), #560bad);
+  background: linear-gradient(135deg, var(--ai), #7209b7);
 }
 
-.chat-input {
+.typing-indicator {
+  display: none;
+  padding: 0.5rem 1rem;
+  font-style: italic;
+  color: var(--text-light);
+}
+
+.typing-indicator.visible {
+  display: block;
+}
+
+.message-input {
   display: flex;
-  padding: 12px;
   gap: 10px;
+  padding: 12px;
   background: #0e1430;
+  border-top: 1px solid #1f2a55;
 }
 
-.chat-input input {
+#user-input {
   flex: 1;
   background: #0b1025;
   border: 1px solid #1f2a55;
   color: var(--text);
   padding: 12px;
   border-radius: 12px;
+  resize: none;
+  min-height: 44px;
   outline: none;
 }
 
-.chat-input button {
-  background: linear-gradient(135deg, var(--accent), #4895ef);
-  border: none;
-  color: #000;
-  padding: 12px 16px;
+#send-button {
+  padding: 0 18px;
   border-radius: 12px;
+  border: none;
   cursor: pointer;
   font-weight: 600;
+  background: linear-gradient(135deg, var(--accent), #4895ef);
+  color: #000;
 }
 
-.chat-input button:hover {
+#send-button:hover {
   opacity: 0.9;
 }
 
-.typing {
-  font-style: italic;
-  opacity: 0.7;
+#send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+footer {
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  color: var(--text-light);
 }
 
 @keyframes fadeIn {
@@ -121,60 +152,39 @@ body {
 </head>
 
 <body>
-  <div class="chat-container">
-    <div class="chat-header">🤖 AI Assistant</div>
 
-    <div class="chat-messages" id="messages">
-      <div class="message ai">Hello! How can I help you today?</div>
-    </div>
+<header>
+  <h1>ASK AI Chat</h1>
+</header>
 
-    <div class="chat-input">
-      <input id="input" type="text" placeholder="Ask something..." />
-      <button onclick="sendMessage()">Send</button>
+<div class="chat-container">
+  <div id="chat-messages" class="chat-messages">
+    <div class="message assistant-message">
+      <p>Hello! I'm an Ask AI. How can I help you today?</p>
     </div>
   </div>
 
-<script>
-const messages = document.getElementById("messages");
-const input = document.getElementById("input");
+  <div class="typing-indicator" id="typing-indicator">
+    AI is thinking...
+  </div>
 
-function addMessage(text, type) {
-  const div = document.createElement("div");
-  div.className = "message " + type;
-  div.textContent = text;
-  messages.appendChild(div);
-  messages.scrollTop = messages.scrollHeight;
-}
+  <div class="message-input">
+    <textarea
+      id="user-input"
+      placeholder="Type your message here..."
+      rows="1"
+      autofocus
+    ></textarea>
+    <button id="send-button">Send</button>
+  </div>
+</div>
 
-function fakeAIResponse(userText) {
-  return "🤖 I received: \"" + userText + "\". Connect me to a real AI backend to make me smarter!";
-}
+<footer>
+  <p>ASK AI Chat Template &copy; 2025</p>
+</footer>
 
-function sendMessage() {
-  const text = input.value.trim();
-  if (!text) return;
+<!-- Existing working logic -->
+<script src="chat.js"></script>
 
-  addMessage(text, "user");
-  input.value = "";
-
-  const typing = document.createElement("div");
-  typing.className = "message ai typing";
-  typing.textContent = "AI is typing...";
-  messages.appendChild(typing);
-  messages.scrollTop = messages.scrollHeight;
-
-  setTimeout(() => {
-    typing.remove();
-    addMessage(fakeAIResponse(text), "ai");
-  }, 800);
-}
-
-input.addEventListener("keydown", e => {
-  if (e.key === "Enter") sendMessage();
-});
-</script>
-
-		<!-- Chat app script -->
-		<script src="chat.js"></script>
-	</body>
+</body>
 </html>
