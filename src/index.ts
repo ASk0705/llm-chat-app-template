@@ -1,6 +1,7 @@
 /**
  * LLM Chat Application Template
- * Cloudflare Workers + Workers AI (Streaming SSE)
+ * Cloudflare Workers + Workers AI
+ * Supports SSE (streaming) and HTTP (JSON)
  */
 
 import { Env, ChatMessage } from "./types";
@@ -23,7 +24,6 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    // Chat API
     if (url.pathname === "/api/chat") {
       if (request.method !== "POST") {
         return new Response("Method not allowed", { status: 405 });
@@ -44,7 +44,7 @@ async function handleChatRequest(
     const messages: ChatMessage[] = body.messages || [];
     const useStream: boolean = body.stream === true;
 
-    // Add system prompt if missing
+    // Ensure system prompt
     if (!messages.some((m) => m.role === "system")) {
       messages.unshift({
         role: "system",
@@ -52,7 +52,9 @@ async function handleChatRequest(
       });
     }
 
-    // STREAM MODE (SSE)
+    /* ============================
+       SSE MODE (STREAMING)
+    ============================= */
     if (useStream) {
       const stream = await env.AI.run(MODEL_ID, {
         messages,
@@ -63,32 +65,43 @@ async function handleChatRequest(
       return new Response(stream, {
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
+          "Cache-Control": "no-cache, no-transform",
           "Connection": "keep-alive",
+          "Content-Encoding": "identity",
         },
       });
     }
 
-    //  HTTP MODE (JSON)
+    /* ============================
+       HTTP MODE (JSON)
+    ============================= */
     const result = await env.AI.run(MODEL_ID, {
       messages,
       max_tokens: 1024,
       stream: false,
     });
 
-    return new Response(JSON.stringify(result), {
-      headers: {
-        "Content-Type": "application/json",
+    return new Response(
+      JSON.stringify({
+        response: result.response ?? "",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Encoding": "identity",
+        },
       },
-    });
-
+    );
   } catch (err) {
     console.error("Chat API error:", err);
     return new Response(
       JSON.stringify({ error: "Failed to process request" }),
       {
         status: 500,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Encoding": "identity",
+        },
       },
     );
   }
