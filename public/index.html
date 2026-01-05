@@ -33,7 +33,7 @@ body {
 }
 
 header {
-  margin: 1rem 0;
+  margin: 1rem 0 0.25rem;
   text-align: center;
 }
 
@@ -44,58 +44,34 @@ h1 {
   -webkit-text-fill-color: transparent;
 }
 
-/* ===== Toggle Switch ===== */
+/* 🔹 MODE TOGGLE (NEW) */
 .mode-toggle {
   margin-top: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: center;
-  font-size: 0.9rem;
+  display: inline-flex;
+  background: #0e1430;
+  border: 1px solid #1f2a55;
+  border-radius: 999px;
+  overflow: hidden;
 }
 
-.switch {
-  position: relative;
-  width: 54px;
-  height: 28px;
+.mode-toggle input {
+  display: none;
 }
 
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
+.mode-toggle label {
+  padding: 6px 14px;
   cursor: pointer;
-  background: #1f2a55;
-  border-radius: 28px;
-  inset: 0;
-  transition: 0.3s;
+  font-size: 0.85rem;
+  color: var(--text-light);
+  transition: background 0.2s, color 0.2s;
 }
 
-.slider:before {
-  content: "";
-  position: absolute;
-  height: 22px;
-  width: 22px;
-  left: 3px;
-  bottom: 3px;
-  background: var(--accent);
-  border-radius: 50%;
-  transition: 0.3s;
+.mode-toggle input:checked + label {
+  background: linear-gradient(135deg, var(--accent), #4895ef);
+  color: #000;
+  font-weight: 600;
 }
 
-input:checked + .slider {
-  background: #1f2a55;
-}
-
-input:checked + .slider:before {
-  transform: translateX(26px);
-}
-
-/* ===== Chat ===== */
 .chat-container {
   width: 100%;
   max-width: 800px;
@@ -168,6 +144,7 @@ input:checked + .slider:before {
   border-radius: 12px;
   resize: none;
   min-height: 44px;
+  outline: none;
 }
 
 #send-button {
@@ -178,6 +155,10 @@ input:checked + .slider:before {
   font-weight: 600;
   background: linear-gradient(135deg, var(--accent), #4895ef);
   color: #000;
+}
+
+#send-button:hover {
+  opacity: 0.9;
 }
 
 #send-button:disabled {
@@ -202,20 +183,21 @@ footer {
 
 <header>
   <h1>ASK AI Chat</h1>
+
+  <!-- ✅ SSE / HTTP TOGGLE -->
   <div class="mode-toggle">
-    <span>HTTP</span>
-    <label class="switch">
-      <input type="checkbox" id="modeToggle" checked />
-      <span class="slider"></span>
-    </label>
-    <span>SSE</span>
+    <input type="radio" id="mode-sse" name="mode" value="sse" checked>
+    <label for="mode-sse">SSE</label>
+
+    <input type="radio" id="mode-http" name="mode" value="http">
+    <label for="mode-http">HTTP</label>
   </div>
 </header>
 
 <div class="chat-container">
   <div id="chat-messages" class="chat-messages">
     <div class="message assistant-message">
-      <p>Hello! I'm an AskAI. How can I help you today?</p>
+      <p>Hello! I'm an Ask AI. How can I help you today?</p>
     </div>
   </div>
 
@@ -224,7 +206,12 @@ footer {
   </div>
 
   <div class="message-input">
-    <textarea id="user-input" placeholder="Type your message here..." rows="1"></textarea>
+    <textarea
+      id="user-input"
+      placeholder="Type your message here..."
+      rows="1"
+      autofocus
+    ></textarea>
     <button id="send-button">Send</button>
   </div>
 </div>
@@ -233,126 +220,8 @@ footer {
   <p>ASK AI Chat Template &copy; 2025</p>
 </footer>
 
-<script>
-const chatMessages = document.getElementById("chat-messages");
-const userInput = document.getElementById("user-input");
-const sendButton = document.getElementById("send-button");
-const typingIndicator = document.getElementById("typing-indicator");
-const modeToggle = document.getElementById("modeToggle");
-
-let isProcessing = false;
-let chatHistory = [];
-
-sendButton.onclick = sendMessage;
-
-userInput.addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
-
-function addMessage(role, text) {
-  const div = document.createElement("div");
-  div.className = `message ${role}-message`;
-  div.innerHTML = `<p></p>`;
-  div.querySelector("p").textContent = text;
-  chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-  return div.querySelector("p");
-}
-
-async function fakeTyping(el, text) {
-  el.textContent = "";
-  for (const ch of text) {
-    el.textContent += ch;
-    await new Promise(r => setTimeout(r, 18));
-  }
-}
-
-async function sendMessage() {
-  const msg = userInput.value.trim();
-  if (!msg || isProcessing) return;
-
-  isProcessing = true;
-  userInput.disabled = true;
-  sendButton.disabled = true;
-
-  addMessage("user", msg);
-  chatHistory.push({ role: "user", content: msg });
-  userInput.value = "";
-  typingIndicator.classList.add("visible");
-
-  const assistantEl = addMessage("assistant", "");
-
-  try {
-    const useSSE = modeToggle.checked;
-
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chatHistory })
-    });
-
-    if (!res.ok) throw new Error("API error");
-
-    if (useSSE) {
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullText = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = consumeSse(buffer);
-        buffer = parsed.buffer;
-
-        for (const ev of parsed.events) {
-          if (ev === "[DONE]") break;
-          const json = JSON.parse(ev);
-          const chunk = json.response || json.choices?.[0]?.delta?.content || "";
-          fullText += chunk;
-          assistantEl.textContent = fullText;
-        }
-      }
-      chatHistory.push({ role: "assistant", content: fullText });
-    } else {
-      const data = await res.json();
-      const text = data.content || data.response || data.choices?.[0]?.message?.content || "";
-      await fakeTyping(assistantEl, text);
-      chatHistory.push({ role: "assistant", content: text });
-    }
-
-  } catch (e) {
-    assistantEl.textContent = "Error processing request.";
-  } finally {
-    typingIndicator.classList.remove("visible");
-    isProcessing = false;
-    userInput.disabled = false;
-    sendButton.disabled = false;
-  }
-}
-
-function consumeSse(buffer) {
-  buffer = buffer.replace(/\r/g, "");
-  const events = [];
-  let idx;
-  while ((idx = buffer.indexOf("\n\n")) !== -1) {
-    const raw = buffer.slice(0, idx);
-    buffer = buffer.slice(idx + 2);
-    const data = raw
-      .split("\n")
-      .filter(l => l.startsWith("data:"))
-      .map(l => l.slice(5).trim())
-      .join("\n");
-    if (data) events.push(data);
-  }
-  return { events, buffer };
-}
-</script>
+<!-- ✅ Logic remains external -->
+<script src="chat.js"></script>
 
 </body>
 </html>
