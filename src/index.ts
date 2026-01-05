@@ -1,104 +1,92 @@
-/**
- * LLM Chat Application Template
- *
- * A simple chat application using Cloudflare Workers AI.
- * This template demonstrates how to implement an LLM-powered chat interface with
- * streaming responses using Server-Sent Events (SSE).
- *
- * @license MIT
- */
-import { Env, ChatMessage } from "./types";
+import { Ai } from "@cloudflare/ai";
 
-// Model ID for Workers AI model
-// https://developers.cloudflare.com/workers-ai/models/
-const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
+export interface Env {
+  AI: Ai;
+}
 
-// Default system prompt
-const SYSTEM_PROMPT =
-	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
+interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+const MODEL_ID = "@cf/meta/llama-3-8b-instruct";
 
 export default {
-	/**
-	 * Main request handler for the Worker
-	 */
-	async fetch(
-		request: Request,
-		env: Env,
-		ctx: ExecutionContext,
-	): Promise<Response> {
-		const url = new URL(request.url);
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Not Found", { status: 404 });
+    }
 
-		// Handle static assets (frontend)
-		if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
-			return env.ASSETS.fetch(request);
-		}
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
 
-		// API Routes
-		if (url.pathname === "/api/chat") {
-			// Handle POST requests for chat
-			if (request.method === "POST") {
-				return handleChatRequest(request, env);
-			}
+    const messages = body.messages as ChatMessage[];
+    const stream = body.stream === true;
 
-			// Method not allowed for other request types
-			return new Response("Method not allowed", { status: 405 });
-		}
+    if (!messages || !Array.isArray(messages)) {
+      return new Response("Invalid request body", { status: 400 });
+    }
 
-		// Handle 404 for unmatched routes
-		return new Response("Not found", { status: 404 });
-	},
-} satisfies ExportedHandler<Env>;
+    const ai = new Ai(env.AI);
 
-/**
- * Handles chat API requests
- */
-async function handleChatRequest(
-	request: Request,
-	env: Env,
-): Promise<Response> {
-	try {
-		// Parse JSON request body
-		const { messages = [] } = (await request.json()) as {
-			messages: ChatMessage[];
-		};
+    /* =========================
+       RUN MODEL
+       ========================= */
+    const aiResponse = await ai.run(MODEL_ID, {
+      messages,
+      stream,
+    });
 
-		// Add system prompt if not present
-		if (!messages.some((msg) => msg.role === "system")) {
-			messages.unshift({ role: "system", content: SYSTEM_PROMPT });
-		}
+    /* =========================
+       SSE MODE
+       ========================= */
+    if (stream) {
+      return new Response(aiResponse as any, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "X-Accel-Buffering": "no", // prevents proxy buffering
+        },
+      });
+    }
 
-		const stream = await env.AI.run(
-			MODEL_ID,
-			{
-				messages,
-				max_tokens: 1024,
-				stream: true,
-			},
-			{
-				// Uncomment to use AI Gateway
-				// gateway: {
-				//   id: "YOUR_GATEWAY_ID", // Replace with your AI Gateway ID
-				//   skipCache: false,      // Set to true to bypass cache
-				//   cacheTtl: 3600,        // Cache time-to-live in seconds
-				// },
-			},
-		);
+    /* =========================
+       HTTP MODE (COLLECT FULL RESPONSE)
+       ========================= */
+    let fullText = "";
 
-		return new Response(stream, {
-			headers: {
-				"content-type": "text/event-stream; charset=utf-8",
-				"cache-control": "no-cache",
-				connection: "keep-alive",
-			},
-		});
-	} catch (error) {
-		console.error("Error processing chat request:", error);
-		return new Response(
-			JSON.stringify({ error: "Failed to process request" }),
-			{
-				status: 500,
-				headers: { "content-type": "application/json" },
-			},
-		);
-	}
-}
+    try {
+      for await (const chunk of aiResponse as any) {
+        if (!chunk) continue;
+
+        // Workers AI streaming format
+        if (typeof chunk === "object" && chunk.response) {
+          fullText += chunk.response;
+        }
+
+        // OpenAI-compatible fallback
+        if (chunk.choices?.[0]?.delta?.content) {
+          fullText += chunk.choices[0].delta.content;
+        }
+      }
+    } catch (err) {
+      console.error("Error reading AI response:", err);
+      return new Response("AI response error", { status: 500 });
+    }
+
+    return new Response(
+      JSON.stringify({ response: fullText }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  },
+};
