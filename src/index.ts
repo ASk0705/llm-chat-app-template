@@ -37,13 +37,14 @@ export default {
 
 async function handleChatRequest(
   request: Request,
-  env: Env
+  env: Env,
 ): Promise<Response> {
   try {
     const body = await request.json();
-    const messages: ChatMessage[] = body.messages ?? [];
+    const messages: ChatMessage[] = body.messages || [];
+    const useStream: boolean = body.stream === true;
 
-    // Inject system prompt if missing
+    // Add system prompt if missing
     if (!messages.some((m) => m.role === "system")) {
       messages.unshift({
         role: "system",
@@ -51,30 +52,44 @@ async function handleChatRequest(
       });
     }
 
-    const stream = await env.AI.run(
-      MODEL_ID,
-      {
+    // STREAM MODE (SSE)
+    if (useStream) {
+      const stream = await env.AI.run(MODEL_ID, {
         messages,
         max_tokens: 1024,
         stream: true,
-      }
-    );
+      });
 
-    return new Response(stream, {
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        },
+      });
+    }
+
+    //  HTTP MODE (JSON)
+    const result = await env.AI.run(MODEL_ID, {
+      messages,
+      max_tokens: 1024,
+      stream: false,
+    });
+
+    return new Response(JSON.stringify(result), {
       headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        "Content-Type": "application/json",
       },
     });
+
   } catch (err) {
-    console.error("Chat error:", err);
+    console.error("Chat API error:", err);
     return new Response(
       JSON.stringify({ error: "Failed to process request" }),
       {
         status: 500,
         headers: { "Content-Type": "application/json" },
-      }
+      },
     );
   }
 }
