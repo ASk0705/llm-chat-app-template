@@ -1,92 +1,80 @@
-import { Ai } from "@cloudflare/ai";
+/**
+ * LLM Chat Application Template
+ * Cloudflare Workers + Workers AI (Streaming SSE)
+ */
 
-export interface Env {
-  AI: Ai;
-}
+import { Env, ChatMessage } from "./types";
 
-interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
 
-const MODEL_ID = "@cf/meta/llama-3-8b-instruct";
+const SYSTEM_PROMPT =
+  "You are a helpful, friendly assistant. Provide concise and accurate responses.";
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method !== "POST") {
-      return new Response("Not Found", { status: 404 });
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Serve frontend assets
+    if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
+      return env.ASSETS.fetch(request);
     }
 
-    let body: any;
-    try {
-      body = await request.json();
-    } catch {
-      return new Response("Invalid JSON", { status: 400 });
+    // Chat API
+    if (url.pathname === "/api/chat") {
+      if (request.method !== "POST") {
+        return new Response("Method not allowed", { status: 405 });
+      }
+      return handleChatRequest(request, env);
     }
 
-    const messages = body.messages as ChatMessage[];
-    const stream = body.stream === true;
+    return new Response("Not found", { status: 404 });
+  },
+} satisfies ExportedHandler<Env>;
 
-    if (!messages || !Array.isArray(messages)) {
-      return new Response("Invalid request body", { status: 400 });
-    }
+async function handleChatRequest(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  try {
+    const body = await request.json();
+    const messages: ChatMessage[] = body.messages ?? [];
 
-    const ai = new Ai(env.AI);
-
-    /* =========================
-       RUN MODEL
-       ========================= */
-    const aiResponse = await ai.run(MODEL_ID, {
-      messages,
-      stream,
-    });
-
-    /* =========================
-       SSE MODE
-       ========================= */
-    if (stream) {
-      return new Response(aiResponse as any, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive",
-          "X-Accel-Buffering": "no", // prevents proxy buffering
-        },
+    // Inject system prompt if missing
+    if (!messages.some((m) => m.role === "system")) {
+      messages.unshift({
+        role: "system",
+        content: SYSTEM_PROMPT,
       });
     }
 
-    /* =========================
-       HTTP MODE (COLLECT FULL RESPONSE)
-       ========================= */
-    let fullText = "";
-
-    try {
-      for await (const chunk of aiResponse as any) {
-        if (!chunk) continue;
-
-        // Workers AI streaming format
-        if (typeof chunk === "object" && chunk.response) {
-          fullText += chunk.response;
-        }
-
-        // OpenAI-compatible fallback
-        if (chunk.choices?.[0]?.delta?.content) {
-          fullText += chunk.choices[0].delta.content;
-        }
-      }
-    } catch (err) {
-      console.error("Error reading AI response:", err);
-      return new Response("AI response error", { status: 500 });
-    }
-
-    return new Response(
-      JSON.stringify({ response: fullText }),
+    const stream = await env.AI.run(
+      MODEL_ID,
       {
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-        },
-      },
+        messages,
+        max_tokens: 1024,
+        stream: true,
+      }
     );
-  },
-};
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  } catch (err) {
+    console.error("Chat error:", err);
+    return new Response(
+      JSON.stringify({ error: "Failed to process request" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+}
